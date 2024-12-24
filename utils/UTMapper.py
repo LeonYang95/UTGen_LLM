@@ -25,6 +25,7 @@ def dir_by_pkg(method_signature):
 
 
 def process_one_bug(bug_id, paths):
+    jsondicts = []
     target_project_dir = os.path.join(d4j_project_home, bug_id, 'fixed')
     if not os.path.exists(target_project_dir):
         logger.warning(f'Fixed version of bug id {bug_id} does not exist.')
@@ -94,34 +95,39 @@ def process_one_bug(bug_id, paths):
                     focal_method_obj = [m for sig, m in src_cls_obj.methods.items() if m.name == focal_method_name][0]
                     test_case_name = tc_signature.split('::')[-1]
                     test_method_obj = [m for sig, m in test_cls_obj.methods.items() if m.name == test_case_name][0]
-                    jsondict = {
-                        'bug_id': bug_id,
-                        'version': 'fixed',
-                        'focal_method_signature': focal_method_obj.signature,
-                        'test_case_signature': tc_signature,
-                        'test_file': test_class_file,
-                        'source_file': source_class_file,
-                        'focal_method': focal_method_obj.text,  # focal method
-                        'test_case': test_method_obj.text,  # test method
-                        'test_case_invocations': tc_invoked_method_list,
-                        'test_class': {
-                            'path': test_class_file,
-                            'imports': test_cls_obj.imports,  # 引用
-                            'fields': [str(f) for k, f in test_cls_obj.fields.items()],  # 定义的属性
-                            'methods': [m.signature for k, m in test_cls_obj.methods.items() if
-                                        k != test_method_obj.signature],  # 定义的函数
-                            'text': test_class  # 完整的测试类
-                        },
-                        'focal_class': {
-                            'path': source_class_file,
-                            'imports': src_cls_obj.imports,  # 引用
-                            'fields': [str(f) for k, f in src_cls_obj.fields.items()],  # 定义的属性
-                            'methods': [m.signature for k, m in src_cls_obj.methods.items() if
-                                        k != focal_method_obj.signature],  # 定义的函数
-                            'text': source_class  # 完整的待测类
+
+                    splitted_test_cases = split_test_case_by_assertion(test_method_obj.text)
+                    for test_case in splitted_test_cases:
+                        jsondict = {
+                            'bug_id': bug_id,
+                            'version': 'fixed',
+                            'focal_method_signature': focal_method_obj.signature,
+                            'test_case_signature': tc_signature,
+                            'test_file': test_class_file,
+                            'source_file': source_class_file,
+                            'focal_method': focal_method_obj.text,  # focal method
+                            'test_case': test_case,  # test method
+                            'parent_test_case':test_method_obj.text,
+                            'test_case_invocations': tc_invoked_method_list,
+                            'test_class': {
+                                'path': test_class_file,
+                                'imports': test_cls_obj.imports,  # 引用
+                                'fields': [str(f) for k, f in test_cls_obj.fields.items()],  # 定义的属性
+                                'methods': [m.signature for k, m in test_cls_obj.methods.items() if
+                                            k != test_method_obj.signature],  # 定义的函数
+                                'text': test_class  # 完整的测试类
+                            },
+                            'focal_class': {
+                                'path': source_class_file,
+                                'imports': src_cls_obj.imports,  # 引用
+                                'fields': [str(f) for k, f in src_cls_obj.fields.items()],  # 定义的属性
+                                'methods': [m.signature for k, m in src_cls_obj.methods.items() if
+                                            k != focal_method_obj.signature],  # 定义的函数
+                                'text': source_class  # 完整的待测类
+                            }
                         }
-                    }
-                    return jsondict
+                        jsondicts.append(pickle.loads(pickle.dumps(jsondict)))
+                    return jsondicts
                 pass
             else:
                 logger.warning(f'Either {test_class_file} or {source_package_dir} does not exist.')
@@ -137,8 +143,9 @@ if __name__ == '__main__':
         bug_paths = json.load(r)
     output_writer = open(os.path.join(code_base,'outputs/defects4j_inputs.jsonl'),'w',encoding='utf-8')
     for bug_id, paths in tqdm(bug_paths.items()):
-        jsondict = process_one_bug(bug_id, paths)
-        if jsondict:
-            output_writer.write(json.dumps(jsondict, ensure_ascii=False) + '\n')
+        jsondicts = process_one_bug(bug_id, paths)
+        if jsondicts:
+            for jsondict in jsondicts:
+                output_writer.write(json.dumps(jsondict, ensure_ascii=False) + '\n')
     output_writer.close()
     pass

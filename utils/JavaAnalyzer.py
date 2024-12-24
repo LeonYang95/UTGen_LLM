@@ -1,3 +1,5 @@
+import pickle
+
 import tree_sitter_java as ts_java
 from loguru import logger
 from tree_sitter import Parser, Language, Node
@@ -242,10 +244,11 @@ def extract_assertion_from_response(response: str):
                 in_block = True
                 continue
         else:
-            if line.startswith('Assert'):
-                cand_lines.append(line[7:])
-            elif line.startswith('assert'):
-                cand_lines.append(line)
+            if in_block:
+                if line.startswith('Assert'):
+                    cand_lines.append(line[7:])
+                else:
+                    cand_lines.append(line)
             else:
                 continue
     return '\n'.join(cand_lines)
@@ -283,13 +286,18 @@ def replace_assertion(test_prefix: str, new_assertion: str) -> str:
         new_test_case = test_prefix.replace(assertion_to_be_replaced, new_assertion)
     return new_test_case
 
-def find_params_in_assertion(assertion:str)->list[str]:
+
+def find_params_in_assertion(assertion: str) -> list[str]:
     params = []
     cls_str = 'public class ABC {\nvoid testA(){\n' + assertion + '\n}\n}'
     tree = parser.parse(bytes(cls_str, 'utf-8'))
     method_decl_node = tree.root_node.children[0].child_by_field_name('body').children[1]
     method_body_node = method_decl_node.child_by_field_name('body')
-    assert len(method_body_node.children) == 3
+    try:
+        assert len(method_body_node.children) == 3
+    except AssertionError:
+        logger.warning(f'Assertion statement {assertion} is not as expected. Expected 3 children, got {len(method_body_node.children)}.')
+        return []
     method_invocation = method_body_node.children[1].children[0]
     assert method_invocation.type == 'method_invocation'
     argument_list_node = method_invocation.child_by_field_name('arguments')
@@ -297,3 +305,49 @@ def find_params_in_assertion(assertion:str)->list[str]:
         if arg.type not in [',', '(', ')']:
             params.append(arg.text.decode('utf-8'))
     return params
+
+
+def split_test_case_by_assertion(method_str: str) -> list[str]:
+    cls_str = 'public class ABC{\n' + method_str + '\n}'
+    tree = parser.parse(bytes(cls_str, 'utf-8'))
+    ret_methods = [method_str]
+    method_decl_node = tree.root_node.children[0].child_by_field_name('body').children[1]
+    method_body_node = method_decl_node.child_by_field_name('body')
+    query = Language(ts_java.language()).query("(method_invocation name: (_) @name) @invoke")
+    assertion_statement_nodes = []
+    for child in method_body_node.children:
+        if child.type == 'expression_statement':
+            method_invocation_nodes = query.captures(child)
+            if 'invoke' not in method_invocation_nodes:
+                continue
+            method_invocation_nodes = method_invocation_nodes['invoke']
+            for node in method_invocation_nodes:
+                if node.child_by_field_name('name').text.decode('utf-8').lower().startswith('assert'):
+                    assertion_statement_nodes.append(child)
+                    pass
+                else:
+                    pass
+    if len(assertion_statement_nodes) == 1:
+        pass
+    else:
+        for i in range(len(assertion_statement_nodes)):
+            cur_method = pickle.loads(pickle.dumps(method_str))
+            cur_assertion = assertion_statement_nodes[i].text.decode('utf-8')
+            for j in range(len(assertion_statement_nodes)):
+                if j == i: continue
+                cur_method = cur_method.replace(assertion_statement_nodes[j].text.decode('utf-8'), '')
+            try:
+                assert cur_assertion in cur_method
+            except AssertionError:
+                continue
+            # 使用正则表达式去除连续空行
+            cleaned_lines = []
+            for line in cur_method.split('\n'):
+                if line.strip():  # 非空行
+                    cleaned_lines.append(line)
+                elif cleaned_lines and cleaned_lines[-1].strip():  # 连续空行只保留一个
+                    cleaned_lines.append(line)
+            cur_method = '\n'.join(cleaned_lines)
+            ret_methods.append(pickle.loads(pickle.dumps(cur_method)))
+        pass
+    return ret_methods

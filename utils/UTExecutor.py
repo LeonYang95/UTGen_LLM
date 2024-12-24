@@ -7,13 +7,13 @@ import sys
 from loguru import logger
 
 sys.path.extend(['.', '..'])
-from utils.JavaAnalyzer import extract_assertion_from_response, replace_assertion,find_params_in_assertion
+from utils.JavaAnalyzer import extract_assertion_from_response, replace_assertion, find_params_in_assertion
 
 boolean_expected_value = ['assertTrue', 'assertFalse']
 nullable_expected_value = ['assertNull', 'assertNotNull']
 
 if __name__ == '__main__':
-    input_file = '/Users/yanglin/Documents/Projects/UTGen_LLM/outputs/logprobs_defects4j/verdict_final-results.jsonl'
+    input_file = '/Users/yanglin/Documents/Projects/UTGen_LLM/outputs/logprobs_defects4j/first_round_multiple_responses-RAGGenerator-results.jsonl'
     d4j_project_base = '/Users/yanglin/Documents/Projects/data/defects4j/d4j_projects'
 
     comparison_file = '/Users/yanglin/Documents/Projects/UTGen_LLM/outputs/defects4j_inputs.jsonl'
@@ -59,7 +59,7 @@ if __name__ == '__main__':
                 new_test_case = replace_assertion(instance['test_prefix'], generated_assertion)
                 if not new_test_case:
                     continue
-            new_test_class = comparison_instance['test_class']['text'].replace(comparison_instance['test_case'],
+            new_test_class = comparison_instance['test_class']['text'].replace(comparison_instance['parent_test_case'],
                                                                                new_test_case)
             try:
                 # write_test_class(bug_id, 'fixed', new_test_class)
@@ -72,11 +72,16 @@ if __name__ == '__main__':
                 if res_output == 'Failing tests: 0\n':
                     passed += 1
                     passed_ids.add(instance['id'])
+                    logger.info('Passed')
+                    if not is_correct and expected_value not in boolean_expected_value and expected_value not in nullable_expected_value:
+                        logger.debug(expected_value + ' vs. '+ generated_assertion)
                 else:
+                    logger.info('Failed')
                     if is_correct:
                         if expected_value in boolean_expected_value or expected_value in nullable_expected_value:
                             if generated_assertion.startswith(expected_value):
-                                logger.warning(f'The expected assertion generated for {bug_id} is correct, but failed in the test.')
+                                logger.warning(
+                                    f'The expected assertion generated for {bug_id} is correct, but failed in the test.')
                                 regarded_as_passed += 1
                                 passed_ids.add(instance['id'])
                         else:
@@ -86,15 +91,22 @@ if __name__ == '__main__':
                             else:
                                 params = find_params_in_assertion(generated_assertion)
                                 if expected_value in params:
-                                    logger.warning(f'The generated expected value({generated_assertion}) for {bug_id} is correct ({expected_value}), but failed in the test.')
+                                    logger.warning(
+                                        f'The generated expected value({generated_assertion}) for {bug_id} is correct ({expected_value}), but failed in the test.')
                                     regarded_as_passed += 1
                                     passed_ids.add(instance['id'])
                                 else:
                                     corrected -= 1
                                     corrected_ids.remove(instance['id'])
                                     logger.error(bug_id)
-                                    logger.error(f"The expected value is {expected_value}, but got the generated assertion {generated_assertion}.")
-
+                                    logger.error(
+                                        f"The expected value is {expected_value}, but got the generated assertion {generated_assertion}.")
+                    else:
+                        if ret.returncode == 0:
+                            print(ret.stdout.decode('utf-8'))
+                        else:
+                            print(ret.stderr.decode('utf-8'))
+                        pass
             finally:
                 # No matter what, write back the original class.
                 # write_test_class(bug_id, 'fixed', comparison_instance['test_class']['text'])
@@ -107,4 +119,5 @@ if __name__ == '__main__':
         f'Regarded as passed: {passed + regarded_as_passed} / {total}  = {(regarded_as_passed + passed) / total :.2%}')
     logger.info(f'Corrected IDs: {corrected_ids}')
     logger.info(f'Passed IDs: {passed_ids}')
+    logger.info(f'{input_file}')
     pass
